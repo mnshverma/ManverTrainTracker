@@ -1,240 +1,127 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState } from 'react';
 import { View, Text, StyleSheet, TextInput, TouchableOpacity, ScrollView, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useTrain } from '../context/TrainContext';
+import { getLiveTrainStatus, formatDate, parseStationsFromAPI, getCurrentStation, getNextStation } from '../services/railwayAPI';
 import { Colors, Spacing, FontSize, FontWeight, BorderRadius } from '../utils/theme';
 
-interface Stop {
+interface Station {
   stationCode: string;
   stationName: string;
   arrivalTime: string;
   departureTime: string;
   platform: string;
   delay: number;
-}
-
-interface Schedule {
-  stops: Stop[];
+  isCurrent?: boolean;
+  isPassed?: boolean;
 }
 
 export default function TrackTrainScreen() {
-  const { state, getTrainPosition } = useTrain();
   const [trainNumber, setTrainNumber] = useState('');
-  const [searchedTrain, setSearchedTrain] = useState<ReturnType<typeof getTrainPosition> | null>(null);
-  const [isSearching, setIsSearching] = useState(false);
+  const [trainData, setTrainData] = useState<any>(null);
+  const [stations, setStations] = useState<Station[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
 
-  const handleSearch = () => {
+  const handleSearch = async () => {
     if (!trainNumber.trim()) return;
-    setIsSearching(true);
-    setTimeout(() => {
-      const train = getTrainPosition(trainNumber.trim());
-      setSearchedTrain(train || null);
-      setIsSearching(false);
-    }, 500);
+    
+    setIsLoading(true);
+    setError(null);
+    setTrainData(null);
+    setStations([]);
+    
+    try {
+      const today = formatDate(new Date());
+      const result = await getLiveTrainStatus(trainNumber.trim(), today);
+      
+      if (result.success && result.data) {
+        setTrainData(result.data);
+        
+        const parsedStations = parseStationsFromAPI(result);
+        setStations(parsedStations);
+      } else {
+        setError(result.error?.toString() || 'Train not found. Please check the train number.');
+      }
+    } catch (err) {
+      setError('Failed to fetch train data. Please try again.');
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const clearSearch = () => {
     setTrainNumber('');
-    setSearchedTrain(null);
+    setTrainData(null);
+    setStations([]);
+    setError(null);
   };
 
-  const getScheduleForTrain = (trainNum: string): Schedule | undefined => {
-    return state.schedules.find(s => s.trainNumber === trainNum);
-  };
+  const currentStation = getCurrentStation(stations);
+  const currentIndex = stations.findIndex(s => s.isCurrent);
+  const nextStation = getNextStation(stations, currentIndex);
 
-  const calculateProgress = (trainNum: string) => {
-    const schedule = getScheduleForTrain(trainNum);
-    if (!schedule || !searchedTrain) return 0;
-
-    const currentLat = searchedTrain.latitude;
-    const stops = schedule.stops;
-    
-    if (stops.length < 2) return 0;
-    
-    const firstStop = state.stations.find(s => s.code === stops[0].stationCode);
-    const lastStop = state.stations.find(s => s.code === stops[stops.length - 1].stationCode);
-    
-    if (!firstStop || !lastStop) return 0;
-    
-    const totalLatDiff = Math.abs(lastStop.location.latitude - firstStop.location.latitude);
-    const totalLonDiff = Math.abs(lastStop.location.longitude - firstStop.location.longitude);
-    const totalDist = Math.sqrt(totalLatDiff ** 2 + totalLonDiff ** 2);
-    
-    const currLatDiff = Math.abs(currentLat - firstStop.location.latitude);
-    const currLonDiff = Math.abs(searchedTrain.longitude - firstStop.location.longitude);
-    const currDist = Math.sqrt(currLatDiff ** 2 + currLonDiff ** 2);
-    
-    return Math.min(100, Math.max(0, (currDist / totalDist) * 100));
-  };
-
-  const getCurrentStopIndex = (trainNum: string): number => {
-    const schedule = getScheduleForTrain(trainNum);
-    if (!schedule || !searchedTrain) return 0;
-    
-    const currentLat = searchedTrain.latitude;
-    const stops = schedule.stops;
-    
-    for (let i = 0; i < stops.length - 1; i++) {
-      const station1 = state.stations.find(s => s.code === stops[i].stationCode);
-      const station2 = state.stations.find(s => s.code === stops[i + 1].stationCode);
+  const renderInitialState = () => (
+    <View style={styles.initialContainer}>
+      <View style={styles.initialIcon}>
+        <Text style={styles.initialEmoji}>🚂</Text>
+      </View>
+      <Text style={styles.initialTitle}>Track Any Train</Text>
+      <Text style={styles.initialText}>Enter any Indian train number to get real-time live status</Text>
       
-      if (station1 && station2) {
-        const lat1 = station1.location.latitude;
-        const lat2 = station2.location.latitude;
-        
-        if (currentLat >= lat1 && currentLat <= lat2) {
-          return i;
-        }
-      }
-    }
-    return stops.length - 1;
-  };
-
-  const progress = searchedTrain ? calculateProgress(searchedTrain.trainNumber) : 0;
-  const currentStopIndex = searchedTrain ? getCurrentStopIndex(searchedTrain.trainNumber) : 0;
-  const schedule = searchedTrain ? getScheduleForTrain(searchedTrain.trainNumber) : null;
-
-  const renderSearchHistory = () => (
-    <View style={styles.historySection}>
-      <Text style={styles.sectionTitle}>Active Trains</Text>
-      <Text style={styles.sectionSubtitle}>Tap to track live location</Text>
-      {state.liveTrains.map(train => {
-        const sched = getScheduleForTrain(train.trainNumber);
-        return (
-          <TouchableOpacity
-            key={train.trainNumber}
-            style={styles.historyItem}
-            onPress={() => {
-              setTrainNumber(train.trainNumber);
-              setSearchedTrain(train);
-            }}
+      <View style={styles.sampleTrains}>
+        <Text style={styles.sampleTitle}>Try these popular trains:</Text>
+        {['12001', '12951', '12301', '12627', '12101'].map(num => (
+          <TouchableOpacity 
+            key={num} 
+            style={styles.sampleChip}
+            onPress={() => setTrainNumber(num)}
           >
-            <View style={styles.historyIcon}>
-              <Text style={styles.historyIconText}>🚂</Text>
-            </View>
-            <View style={styles.historyInfo}>
-              <Text style={styles.historyTrainNumber}>{train.trainNumber}</Text>
-              <Text style={styles.historyTrainName}>{sched?.trainName || 'Unknown'}</Text>
-            </View>
-            <View style={styles.liveBadge}>
-              <View style={styles.liveDotSmall} />
-              <Text style={styles.liveTextSmall}>LIVE</Text>
-            </View>
+            <Text style={styles.sampleChipText}>{num}</Text>
           </TouchableOpacity>
-        );
-      })}
+        ))}
+      </View>
     </View>
   );
 
-  const renderJourneyTimeline = () => {
-    if (!schedule || !searchedTrain) return null;
+  const renderLoading = () => (
+    <View style={styles.loadingContainer}>
+      <ActivityIndicator size="large" color={Colors.primary} />
+      <Text style={styles.loadingText}>Fetching live status...</Text>
+      <Text style={styles.loadingSubtext}>Connecting to Indian Railways</Text>
+    </View>
+  );
 
-    const stops = schedule.stops;
+  const renderError = () => (
+    <View style={styles.errorContainer}>
+      <Text style={styles.errorIcon}>⚠️</Text>
+      <Text style={styles.errorTitle}>Oops!</Text>
+      <Text style={styles.errorText}>{error}</Text>
+      <TouchableOpacity style={styles.retryButton} onPress={handleSearch}>
+        <Text style={styles.retryText}>Retry</Text>
+      </TouchableOpacity>
+      <TouchableOpacity style={styles.backButton} onPress={clearSearch}>
+        <Text style={styles.backText}>Try Different Train</Text>
+      </TouchableOpacity>
+    </View>
+  );
 
-    return (
-      <View style={styles.timelineContainer}>
-        <View style={styles.progressBarContainer}>
-          <View style={styles.progressTrack}>
-            <View style={[styles.progressFill, { width: `${progress}%` }]} />
-            <View style={[styles.trainIcon, { left: `${progress}%` }]}>
-              <Text style={styles.trainIconEmoji}>🚂</Text>
-            </View>
-          </View>
-        </View>
+  const renderResult = () => {
+    if (!trainData) return null;
 
-        <View style={styles.stopsContainer}>
-          {stops.map((stop, index) => {
-            const isCompleted = index < currentStopIndex;
-            const isCurrent = index === currentStopIndex;
-            const isPending = index > currentStopIndex;
-            
-            return (
-              <View key={index} style={[styles.stopRow, isCurrent && styles.stopRowActive]}>
-                <View style={styles.stopTimeColumn}>
-                  <Text style={[styles.stopTime, isCompleted && styles.stopTimeCompleted]}>
-                    {stop.arrivalTime}
-                  </Text>
-                  {stop.delay > 0 && (
-                    <Text style={styles.delayBadge}>+{stop.delay}m</Text>
-                  )}
-                </View>
-
-                <View style={styles.stopMarkerColumn}>
-                  {isCurrent ? (
-                    <View style={styles.currentStopMarker}>
-                      <View style={styles.trainMarker}>
-                        <Text style={styles.trainMarkerText}>🚂</Text>
-                      </View>
-                    </View>
-                  ) : (
-                    <View style={[styles.stopDot, isCompleted && styles.stopDotCompleted]} />
-                  )}
-                  {index < stops.length - 1 && (
-                    <View style={[styles.stopLine, isCompleted && styles.stopLineCompleted]} />
-                  )}
-                </View>
-
-                <View style={[styles.stopInfoColumn, isCurrent && styles.stopInfoColumnActive]}>
-                  <Text style={[styles.stopName, isCurrent && styles.stopNameActive]}>
-                    {stop.stationName}
-                  </Text>
-                  <Text style={styles.stopCode}>{stop.stationCode}</Text>
-                  {isCurrent && (
-                    <View style={styles.currentStatusBadge}>
-                      <Text style={styles.currentStatusText}>Current Location</Text>
-                    </View>
-                  )}
-                  {isCompleted && (
-                    <Text style={styles.passedText}>Passed</Text>
-                  )}
-                </View>
-
-                <View style={styles.platformColumn}>
-                  {isCurrent && (
-                    <View style={styles.platformBadge}>
-                      <Text style={styles.platformLabel}>Plt</Text>
-                      <Text style={styles.platformNumber}>{stop.platform}</Text>
-                    </View>
-                  )}
-                </View>
-              </View>
-            );
-          })}
-        </View>
-      </View>
-    );
-  };
-
-  const renderSearchResult = () => {
-    if (isSearching) {
-      return (
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color={Colors.primary} />
-          <Text style={styles.loadingText}>Locating train...</Text>
-        </View>
-      );
-    }
-
-    if (!searchedTrain) {
-      return (
-        <View style={styles.notFoundContainer}>
-          <Text style={styles.notFoundIcon}>🔍</Text>
-          <Text style={styles.notFoundText}>Train not found</Text>
-          <Text style={styles.notFoundSubtext}>Try entering a valid train number</Text>
-        </View>
-      );
-    }
-
-    const sched = getScheduleForTrain(searchedTrain.trainNumber);
+    const progress = stations.length > 0 
+      ? ((currentIndex + 0.5) / stations.length) * 100 
+      : 0;
 
     return (
       <ScrollView style={styles.resultContainer} showsVerticalScrollIndicator={false}>
         <View style={styles.trainHeaderCard}>
           <View style={styles.trainHeaderTop}>
             <View>
-              <Text style={styles.trainNumberLarge}>{searchedTrain.trainNumber}</Text>
-              <Text style={styles.trainNameLarge}>{sched?.trainName || 'Unknown Train'}</Text>
-              <Text style={styles.trainRoute}>{sched?.origin} → {sched?.destination}</Text>
+              <Text style={styles.trainNumberLarge}>{trainData.trainNo || trainNumber}</Text>
+              <Text style={styles.trainNameLarge}>{trainData.trainName || 'Express'}</Text>
+              {trainData.statusNote && (
+                <Text style={styles.statusNote}>{trainData.statusNote}</Text>
+              )}
             </View>
             <View style={styles.liveIndicatorBig}>
               <View style={styles.liveDot} />
@@ -242,35 +129,109 @@ export default function TrackTrainScreen() {
             </View>
           </View>
 
-          <View style={styles.statsRow}>
-            <View style={styles.statItem}>
-              <Text style={styles.statValue}>{searchedTrain.speed}</Text>
-              <Text style={styles.statLabel}>km/h</Text>
+          {currentStation && (
+            <View style={styles.currentInfoCard}>
+              <Text style={styles.currentLabel}>📍 Current Location</Text>
+              <Text style={styles.currentStation}>{currentStation.stationName}</Text>
+              {currentStation.platform && (
+                <Text style={styles.currentPlatform}>Platform {currentStation.platform}</Text>
+              )}
+              {currentStation.delay > 0 && (
+                <View style={styles.delayBadge}>
+                  <Text style={styles.delayText}>+{currentStation.delay} min delay</Text>
+                </View>
+              )}
             </View>
-            <View style={styles.statDivider} />
-            <View style={styles.statItem}>
-              <Text style={styles.statValue}>{searchedTrain.nextStation}</Text>
-              <Text style={styles.statLabel}>Next Station</Text>
-            </View>
-            <View style={styles.statDivider} />
-            <View style={styles.statItem}>
-              <Text style={styles.statValue}>{searchedTrain.estimatedArrival}</Text>
-              <Text style={styles.statLabel}>ETA</Text>
-            </View>
-          </View>
+          )}
 
-          {sched?.status === 'delayed' && (
-            <View style={styles.delayCard}>
-              <Text style={styles.delayIcon}>⚠️</Text>
-              <Text style={styles.delayText}>Delayed by {sched.delayMinutes} minutes</Text>
+          {nextStation && (
+            <View style={styles.nextInfoCard}>
+              <Text style={styles.nextLabel}>Next Station</Text>
+              <Text style={styles.nextStation}>{nextStation.stationName}</Text>
+              {nextStation.arrivalTime && (
+                <Text style={styles.nextTime}>ETA: {nextStation.arrivalTime}</Text>
+              )}
             </View>
+          )}
+
+          {trainData.lastUpdate && (
+            <Text style={styles.lastUpdate}>Last updated: {trainData.lastUpdate}</Text>
           )}
         </View>
 
-        <View style={styles.journeySection}>
-          <Text style={styles.journeyTitle}>🚆 Journey Progress</Text>
-          {renderJourneyTimeline()}
-        </View>
+        {stations.length > 0 && (
+          <View style={styles.journeySection}>
+            <Text style={styles.journeyTitle}>🚆 Live Journey</Text>
+            
+            <View style={styles.timelineContainer}>
+              <View style={styles.progressBarContainer}>
+                <View style={styles.progressTrack}>
+                  <View style={[styles.progressFill, { width: `${Math.min(progress, 95)}%` }]} />
+                  <View style={[styles.trainIcon, { left: `${Math.min(progress, 95)}%` }]}>
+                    <Text style={styles.trainIconEmoji}>🚂</Text>
+                  </View>
+                </View>
+              </View>
+
+              <View style={styles.stopsContainer}>
+                {stations.map((stop, index) => {
+                  const isPassed = stop.isPassed || index < currentIndex;
+                  const isCurrent = stop.isCurrent;
+                  const isPending = index > currentIndex;
+                  
+                  return (
+                    <View key={index} style={[styles.stopRow, isCurrent && styles.stopRowActive]}>
+                      <View style={styles.stopTimeColumn}>
+                        <Text style={[styles.stopTime, isPassed && styles.stopTimeCompleted, isPending && styles.stopTimePending]}>
+                          {stop.arrivalTime || '--:--'}
+                        </Text>
+                        {stop.delay > 0 && (
+                          <Text style={styles.delayBadgeSmall}>+{stop.delay}m</Text>
+                        )}
+                      </View>
+
+                      <View style={styles.stopMarkerColumn}>
+                        {isCurrent ? (
+                          <View style={styles.currentStopMarker}>
+                            <View style={styles.trainMarker}>
+                              <Text style={styles.trainMarkerText}>🚂</Text>
+                            </View>
+                          </View>
+                        ) : (
+                          <View style={[styles.stopDot, isPassed && styles.stopDotCompleted, isPending && styles.stopDotPending]} />
+                        )}
+                        {index < stations.length - 1 && (
+                          <View style={[styles.stopLine, isPassed && styles.stopLineCompleted, isPending && styles.stopLinePending]} />
+                        )}
+                      </View>
+
+                      <View style={[styles.stopInfoColumn, isCurrent && styles.stopInfoColumnActive]}>
+                        <Text style={[styles.stopName, isCurrent && styles.stopNameActive, isPassed && styles.stopNamePassed, isPending && styles.stopNamePending]}>
+                          {stop.stationName}
+                        </Text>
+                        <Text style={styles.stopCode}>{stop.stationCode}</Text>
+                        {isCurrent && (
+                          <View style={styles.currentStatusBadge}>
+                            <Text style={styles.currentStatusText}>Current</Text>
+                          </View>
+                        )}
+                      </View>
+
+                      <View style={styles.platformColumn}>
+                        {stop.platform && stop.platform !== '-' && (
+                          <View style={[styles.platformBadge, isPassed && styles.platformBadgePassed, isPending && styles.platformBadgePending]}>
+                            <Text style={[styles.platformLabel, isCurrent && styles.platformLabelActive]}>Plt</Text>
+                            <Text style={[styles.platformNumber, isCurrent && styles.platformNumberActive]}>{stop.platform}</Text>
+                          </View>
+                        )}
+                      </View>
+                    </View>
+                  );
+                })}
+              </View>
+            </View>
+          </View>
+        )}
 
         <TouchableOpacity style={styles.trackAnotherButton} onPress={clearSearch}>
           <Text style={styles.trackAnotherText}>Track Another Train</Text>
@@ -279,11 +240,18 @@ export default function TrackTrainScreen() {
     );
   };
 
+  const renderContent = () => {
+    if (isLoading) return renderLoading();
+    if (error) return renderError();
+    if (trainData) return renderResult();
+    return renderInitialState();
+  };
+
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <View style={styles.header}>
         <Text style={styles.title}>Track Your Train</Text>
-        <Text style={styles.subtitle}>Enter train number for live location</Text>
+        <Text style={styles.subtitle}>Real-time Indian Railways live status</Text>
       </View>
 
       <View style={styles.searchContainer}>
@@ -303,12 +271,16 @@ export default function TrackTrainScreen() {
             </TouchableOpacity>
           )}
         </View>
-        <TouchableOpacity style={styles.searchButton} onPress={handleSearch}>
-          <Text style={styles.searchButtonText}>Track</Text>
+        <TouchableOpacity 
+          style={[styles.searchButton, isLoading && styles.searchButtonDisabled]} 
+          onPress={handleSearch}
+          disabled={isLoading || !trainNumber.trim()}
+        >
+          <Text style={styles.searchButtonText}>{isLoading ? '...' : 'Track'}</Text>
         </TouchableOpacity>
       </View>
 
-      {searchedTrain !== null ? renderSearchResult() : renderSearchHistory()}
+      {renderContent()}
     </SafeAreaView>
   );
 }
@@ -367,107 +339,130 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.lg,
     borderRadius: BorderRadius.md,
     justifyContent: 'center',
+    minWidth: 70,
+  },
+  searchButtonDisabled: {
+    backgroundColor: Colors.disabled,
   },
   searchButtonText: {
     color: Colors.textLight,
     fontSize: FontSize.md,
     fontWeight: FontWeight.semibold,
+    textAlign: 'center',
   },
-  historySection: {
-    paddingHorizontal: Spacing.md,
-  },
-  sectionTitle: {
-    fontSize: FontSize.lg,
-    fontWeight: FontWeight.semibold,
-    color: Colors.text,
-    marginBottom: Spacing.xs,
-  },
-  sectionSubtitle: {
-    fontSize: FontSize.sm,
-    color: Colors.textSecondary,
-    marginBottom: Spacing.md,
-  },
-  historyItem: {
-    flexDirection: 'row',
+  initialContainer: {
+    flex: 1,
     alignItems: 'center',
-    backgroundColor: Colors.surface,
-    padding: Spacing.md,
-    borderRadius: BorderRadius.md,
-    marginBottom: Spacing.sm,
+    justifyContent: 'center',
+    paddingHorizontal: Spacing.lg,
+    paddingTop: Spacing.xxl,
   },
-  historyIcon: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+  initialIcon: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
     backgroundColor: Colors.primaryLight,
     justifyContent: 'center',
     alignItems: 'center',
+    marginBottom: Spacing.md,
   },
-  historyIconText: {
-    fontSize: 22,
+  initialEmoji: {
+    fontSize: 40,
   },
-  historyInfo: {
-    flex: 1,
-    marginLeft: Spacing.md,
-  },
-  historyTrainNumber: {
-    fontSize: FontSize.lg,
+  initialTitle: {
+    fontSize: FontSize.xl,
     fontWeight: FontWeight.bold,
     color: Colors.text,
+    marginBottom: Spacing.sm,
   },
-  historyTrainName: {
-    fontSize: FontSize.sm,
+  initialText: {
+    fontSize: FontSize.md,
     color: Colors.textSecondary,
+    textAlign: 'center',
+    marginBottom: Spacing.lg,
   },
-  liveBadge: {
-    flexDirection: 'row',
+  sampleTrains: {
     alignItems: 'center',
-    backgroundColor: Colors.successLight,
-    paddingHorizontal: Spacing.sm,
-    paddingVertical: 4,
-    borderRadius: BorderRadius.sm,
   },
-  liveDotSmall: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: Colors.success,
-    marginRight: 4,
+  sampleTitle: {
+    fontSize: FontSize.md,
+    color: Colors.textSecondary,
+    marginBottom: Spacing.md,
   },
-  liveTextSmall: {
-    fontSize: 10,
-    fontWeight: FontWeight.bold,
-    color: Colors.success,
+  sampleChip: {
+    backgroundColor: Colors.surface,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+    borderRadius: BorderRadius.md,
+    marginHorizontal: Spacing.xs,
+    marginBottom: Spacing.sm,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  sampleChipText: {
+    fontSize: FontSize.md,
+    color: Colors.primary,
+    fontWeight: FontWeight.medium,
   },
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+    paddingTop: Spacing.xxl,
   },
   loadingText: {
+    fontSize: FontSize.lg,
+    fontWeight: FontWeight.medium,
+    color: Colors.text,
     marginTop: Spacing.md,
+  },
+  loadingSubtext: {
     fontSize: FontSize.md,
     color: Colors.textSecondary,
+    marginTop: Spacing.xs,
   },
-  notFoundContainer: {
+  errorContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
     paddingHorizontal: Spacing.lg,
+    paddingTop: Spacing.xxl,
   },
-  notFoundIcon: {
+  errorIcon: {
     fontSize: 48,
     marginBottom: Spacing.md,
   },
-  notFoundText: {
-    fontSize: FontSize.lg,
-    fontWeight: FontWeight.medium,
+  errorTitle: {
+    fontSize: FontSize.xl,
+    fontWeight: FontWeight.bold,
     color: Colors.text,
+    marginBottom: Spacing.sm,
   },
-  notFoundSubtext: {
+  errorText: {
     fontSize: FontSize.md,
     color: Colors.textSecondary,
-    marginTop: Spacing.xs,
+    textAlign: 'center',
+    marginBottom: Spacing.lg,
+  },
+  retryButton: {
+    backgroundColor: Colors.primary,
+    paddingHorizontal: Spacing.lg,
+    paddingVertical: Spacing.md,
+    borderRadius: BorderRadius.md,
+    marginBottom: Spacing.sm,
+  },
+  retryText: {
+    color: Colors.textLight,
+    fontSize: FontSize.md,
+    fontWeight: FontWeight.semibold,
+  },
+  backButton: {
+    paddingHorizontal: Spacing.lg,
+    paddingVertical: Spacing.md,
+  },
+  backText: {
+    color: Colors.primary,
+    fontSize: FontSize.md,
   },
   resultContainer: {
     flex: 1,
@@ -500,8 +495,8 @@ const styles = StyleSheet.create({
     color: Colors.text,
     marginTop: 2,
   },
-  trainRoute: {
-    fontSize: FontSize.md,
+  statusNote: {
+    fontSize: FontSize.sm,
     color: Colors.textSecondary,
     marginTop: 4,
   },
@@ -525,48 +520,68 @@ const styles = StyleSheet.create({
     fontWeight: FontWeight.bold,
     color: Colors.success,
   },
-  statsRow: {
-    flexDirection: 'row',
+  currentInfoCard: {
+    backgroundColor: Colors.primaryLight,
+    padding: Spacing.md,
+    borderRadius: BorderRadius.md,
     marginTop: Spacing.md,
-    paddingTop: Spacing.md,
-    borderTopWidth: 1,
-    borderTopColor: Colors.border,
   },
-  statItem: {
-    flex: 1,
-    alignItems: 'center',
+  currentLabel: {
+    fontSize: FontSize.sm,
+    color: Colors.textSecondary,
   },
-  statValue: {
-    fontSize: FontSize.lg,
+  currentStation: {
+    fontSize: FontSize.xl,
     fontWeight: FontWeight.bold,
-    color: Colors.text,
+    color: Colors.primary,
+    marginTop: 2,
   },
-  statLabel: {
+  currentPlatform: {
+    fontSize: FontSize.md,
+    color: Colors.text,
+    marginTop: 4,
+  },
+  delayBadge: {
+    backgroundColor: Colors.warning,
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: 2,
+    borderRadius: BorderRadius.sm,
+    alignSelf: 'flex-start',
+    marginTop: Spacing.xs,
+  },
+  delayText: {
     fontSize: FontSize.xs,
+    color: Colors.textLight,
+    fontWeight: FontWeight.medium,
+  },
+  nextInfoCard: {
+    backgroundColor: Colors.surface,
+    padding: Spacing.md,
+    borderRadius: BorderRadius.md,
+    marginTop: Spacing.sm,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  nextLabel: {
+    fontSize: FontSize.sm,
+    color: Colors.textSecondary,
+  },
+  nextStation: {
+    fontSize: FontSize.lg,
+    fontWeight: FontWeight.semibold,
+    color: Colors.text,
+    marginTop: 2,
+  },
+  nextTime: {
+    fontSize: FontSize.md,
     color: Colors.textSecondary,
     marginTop: 2,
   },
-  statDivider: {
-    width: 1,
-    backgroundColor: Colors.border,
-    marginHorizontal: Spacing.sm,
-  },
-  delayCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: Colors.warningLight,
-    padding: Spacing.sm,
-    borderRadius: BorderRadius.md,
+  lastUpdate: {
+    fontSize: FontSize.xs,
+    color: Colors.textSecondary,
     marginTop: Spacing.sm,
-  },
-  delayIcon: {
-    fontSize: 16,
-    marginRight: Spacing.xs,
-  },
-  delayText: {
-    fontSize: FontSize.md,
-    color: Colors.warning,
-    fontWeight: FontWeight.medium,
+    textAlign: 'right',
   },
   journeySection: {
     marginBottom: Spacing.lg,
@@ -611,7 +626,7 @@ const styles = StyleSheet.create({
   },
   stopRow: {
     flexDirection: 'row',
-    minHeight: 60,
+    minHeight: 56,
   },
   stopRowActive: {
     backgroundColor: Colors.primaryLight,
@@ -623,6 +638,7 @@ const styles = StyleSheet.create({
     width: 55,
     alignItems: 'flex-end',
     paddingRight: Spacing.sm,
+    justifyContent: 'center',
   },
   stopTime: {
     fontSize: FontSize.md,
@@ -632,10 +648,12 @@ const styles = StyleSheet.create({
   stopTimeCompleted: {
     color: Colors.text,
   },
-  delayBadge: {
+  stopTimePending: {
+    color: Colors.textSecondary,
+  },
+  delayBadgeSmall: {
     fontSize: FontSize.xs,
     color: Colors.error,
-    marginTop: 2,
   },
   stopMarkerColumn: {
     width: 30,
@@ -665,6 +683,9 @@ const styles = StyleSheet.create({
   stopDotCompleted: {
     backgroundColor: Colors.success,
   },
+  stopDotPending: {
+    backgroundColor: Colors.border,
+  },
   stopLine: {
     width: 2,
     flex: 1,
@@ -675,10 +696,14 @@ const styles = StyleSheet.create({
   stopLineCompleted: {
     backgroundColor: Colors.success,
   },
+  stopLinePending: {
+    backgroundColor: Colors.border,
+  },
   stopInfoColumn: {
     flex: 1,
     paddingLeft: Spacing.sm,
     paddingVertical: Spacing.xs,
+    justifyContent: 'center',
   },
   stopInfoColumnActive: {
     paddingLeft: Spacing.md,
@@ -692,6 +717,12 @@ const styles = StyleSheet.create({
     color: Colors.primary,
     fontWeight: FontWeight.bold,
     fontSize: FontSize.lg,
+  },
+  stopNamePassed: {
+    color: Colors.text,
+  },
+  stopNamePending: {
+    color: Colors.textSecondary,
   },
   stopCode: {
     fontSize: FontSize.sm,
@@ -710,11 +741,6 @@ const styles = StyleSheet.create({
     color: Colors.textLight,
     fontWeight: FontWeight.medium,
   },
-  passedText: {
-    fontSize: FontSize.xs,
-    color: Colors.success,
-    marginTop: 4,
-  },
   platformColumn: {
     width: 40,
     alignItems: 'center',
@@ -722,18 +748,30 @@ const styles = StyleSheet.create({
   },
   platformBadge: {
     backgroundColor: Colors.primary,
-    paddingHorizontal: Spacing.sm,
-    paddingVertical: Spacing.xs,
+    paddingHorizontal: Spacing.xs,
+    paddingVertical: 2,
     borderRadius: BorderRadius.sm,
     alignItems: 'center',
+  },
+  platformBadgePassed: {
+    backgroundColor: Colors.success,
+  },
+  platformBadgePending: {
+    backgroundColor: Colors.border,
   },
   platformLabel: {
     fontSize: 8,
     color: Colors.textLight,
   },
+  platformLabelActive: {
+    color: Colors.textLight,
+  },
   platformNumber: {
-    fontSize: FontSize.md,
+    fontSize: FontSize.sm,
     fontWeight: FontWeight.bold,
+    color: Colors.textLight,
+  },
+  platformNumberActive: {
     color: Colors.textLight,
   },
   trackAnotherButton: {
