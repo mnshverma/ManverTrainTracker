@@ -2,7 +2,7 @@ import React from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { View, Text, StyleSheet } from 'react-native';
-import { HomeScreen, LiveMapScreen, StationsScreen, SettingsScreen } from '../screens';
+import { HomeScreen, LiveMapScreen, StationsScreen, SettingsScreen, TrackTrainScreen } from '../screens';
 import { Colors, FontSize } from '../utils/theme';
 
 const Tab = createBottomTabNavigator();
@@ -37,6 +37,13 @@ export default function AppNavigator() {
           component={HomeScreen}
           options={{
             tabBarIcon: ({ focused }) => <TabIcon focused={focused} icon="🔍" />,
+          }}
+        />
+        <Tab.Screen
+          name="Track"
+          component={TrackTrainScreen}
+          options={{
+            tabBarIcon: ({ focused }) => <TabIcon focused={focused} icon="🚂" />,
           }}
         />
         <Tab.Screen
