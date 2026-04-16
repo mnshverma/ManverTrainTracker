@@ -1,11 +1,19 @@
 import React, { useState } from 'react';
 import { View, Text, StyleSheet, FlatList, RefreshControl } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useNavigation } from '@react-navigation/native';
+import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useTrain } from '../context/TrainContext';
 import { TrainCard, SearchInput } from '../components';
 import { Colors, Spacing, FontSize, FontWeight } from '../utils/theme';
 
+type RootStackParamList = {
+  HomeMain: undefined;
+  TrainDetails: { train: any };
+};
+
 export default function HomeScreen() {
+  const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const { state, dispatch, searchTrains } = useTrain();
   const [searchQuery, setSearchQuery] = useState('');
   const [refreshing, setRefreshing] = useState(false);
@@ -50,7 +58,7 @@ export default function HomeScreen() {
         data={displayedTrains}
         keyExtractor={(item) => item.id}
         renderItem={({ item }) => (
-          <TrainCard train={item} onPress={() => {}} />
+          <TrainCard train={item} onPress={() => navigation.navigate('TrainDetails', { train: item })} />
         )}
         ListEmptyComponent={renderEmptyList}
         refreshControl={

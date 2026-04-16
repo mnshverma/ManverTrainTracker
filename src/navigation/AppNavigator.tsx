@@ -1,11 +1,13 @@
 import React from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
+import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { View, Text, StyleSheet } from 'react-native';
-import { HomeScreen, LiveMapScreen, StationsScreen, SettingsScreen, TrackTrainScreen } from '../screens';
+import { HomeScreen, LiveMapScreen, StationsScreen, SettingsScreen, TrackTrainScreen, TrainDetailsScreen } from '../screens';
 import { Colors, FontSize } from '../utils/theme';
 
 const Tab = createBottomTabNavigator();
+const Stack = createNativeStackNavigator();
 
 interface TabIconProps {
   focused: boolean;
@@ -17,6 +19,15 @@ function TabIcon({ focused, icon }: TabIconProps) {
     <View style={styles.tabIconContainer}>
       <Text style={[styles.tabIcon, focused && styles.tabIconFocused]}>{icon}</Text>
     </View>
+  );
+}
+
+function HomeStack() {
+  return (
+    <Stack.Navigator screenOptions={{ headerShown: false }}>
+      <Stack.Screen name="HomeMain" component={HomeScreen} />
+      <Stack.Screen name="TrainDetails" component={TrainDetailsScreen} />
+    </Stack.Navigator>
   );
 }
 
@@ -34,7 +45,7 @@ export default function AppNavigator() {
       >
         <Tab.Screen
           name="Home"
-          component={HomeScreen}
+          component={HomeStack}
           options={{
             tabBarIcon: ({ focused }) => <TabIcon focused={focused} icon="🔍" />,
           }}
