@@ -1,24 +1,12 @@
-import React, { useState, useRef } from 'react';
-import { View, Text, StyleSheet, Dimensions, TouchableOpacity, FlatList } from 'react-native';
+import React, { useState } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, FlatList, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import MapView, { Marker, PROVIDER_GOOGLE } from 'react-native-maps';
 import { useTrain } from '../context/TrainContext';
 import { Colors, Spacing, FontSize, FontWeight, BorderRadius } from '../utils/theme';
 
-const { width, height } = Dimensions.get('window');
-const ASPECT_RATIO = width / height;
-const LATITUDE_DELTA = 10;
-const LONGITUDE_DELTA = LATITUDE_DELTA * ASPECT_RATIO;
-
-const initialRegion = {
-  latitude: 23.5,
-  longitude: 80.5,
-  latitudeDelta: LATITUDE_DELTA,
-  longitudeDelta: LONGITUDE_DELTA,
-};
+const isWeb = Platform.OS === 'web';
 
 export default function LiveMapScreen() {
-  const mapRef = useRef<MapView>(null);
   const { state, getStationByCode, getTrainPosition } = useTrain();
   const [selectedTrain, setSelectedTrain] = useState<string | null>(null);
 
@@ -42,34 +30,16 @@ export default function LiveMapScreen() {
       </View>
 
       <View style={styles.mapContainer}>
-        <MapView
-          ref={mapRef}
-          style={styles.map}
-          initialRegion={initialRegion}
-          showsUserLocation
-          showsMyLocationButton
-        >
-          {stationMarkers.map((station) => (
-            <Marker
-              key={station.code}
-              coordinate={station.location}
-              title={station.name}
-              description={`${station.platforms} platforms`}
-              pinColor={Colors.primary}
-            />
-          ))}
-
-          {state.liveTrains.map((train) => (
-            <Marker
-              key={train.trainNumber}
-              coordinate={{ latitude: train.latitude, longitude: train.longitude }}
-              title={train.trainNumber}
-              description={`Next: ${train.nextStation} - ${train.estimatedArrival}`}
-              pinColor={Colors.secondary}
-              onPress={() => setSelectedTrain(train.trainNumber)}
-            />
-          ))}
-        </MapView>
+        {isWeb ? (
+          <View style={styles.webPlaceholder}>
+            <Text style={styles.webPlaceholderText}>🗺️ Map view available in mobile app</Text>
+            <Text style={styles.webSubtext}>{stationMarkers.length} stations • {state.liveTrains.length} live trains</Text>
+          </View>
+        ) : (
+          <View style={styles.mapPlaceholder}>
+            <Text style={styles.mapPlaceholderText}>Map (requires native build)</Text>
+          </View>
+        )}
       </View>
 
       <View style={styles.legendContainer}>
@@ -143,10 +113,36 @@ const styles = StyleSheet.create({
     marginTop: Spacing.xs,
   },
   mapContainer: {
-    height: height * 0.45,
+    height: 300,
     marginHorizontal: Spacing.md,
     borderRadius: BorderRadius.lg,
     overflow: 'hidden',
+  },
+  webPlaceholder: {
+    flex: 1,
+    backgroundColor: Colors.surface,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: Spacing.lg,
+  },
+  webPlaceholderText: {
+    fontSize: FontSize.lg,
+    color: Colors.text,
+    marginBottom: Spacing.sm,
+  },
+  webSubtext: {
+    fontSize: FontSize.sm,
+    color: Colors.textSecondary,
+  },
+  mapPlaceholder: {
+    flex: 1,
+    backgroundColor: Colors.surface,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  mapPlaceholderText: {
+    fontSize: FontSize.md,
+    color: Colors.textSecondary,
   },
   map: {
     flex: 1,
